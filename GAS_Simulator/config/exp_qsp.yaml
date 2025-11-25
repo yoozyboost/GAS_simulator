@@ -1,0 +1,19 @@
+experiment_name: "qsp_spin_benchmark"
+problem:
+  n_key: 6  # 少し大きくして探索の様子を見やすく
+  objective_function: "x0 + x1 - x2 - x3 + 2*x4 - 2*x5"
+  variable_type: "spin"
+
+algorithm:
+  method: "qsp"
+  initial_state: "hadamard"
+  qsp_params:
+    qsp_degree: 21
+    threshold: 0.0
+
+execution:         # 新しいセクション
+  num_trials: 50   # 50回試行して平均を取る
+
+simulation:
+  backend: "analytical" # 高速化のため数理モデル推奨（50回回すなら必須級）
+  max_iterations: 50

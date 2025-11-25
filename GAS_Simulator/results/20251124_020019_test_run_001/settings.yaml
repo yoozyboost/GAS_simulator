@@ -1,0 +1,13 @@
+algorithm:
+  initial_state: uniform
+  method: qd
+execution:
+  max_iterations: 50
+experiment_name: test_run_001
+problem:
+  n_key: 6
+  objective_function: x0 + x1 - x2 - x3 + 2*x4 - 2*x5
+  variable_type: binary
+simulation:
+  backend: statevector
+  max_iterations: 50

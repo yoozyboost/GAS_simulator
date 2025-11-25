@@ -1,0 +1,10 @@
+=== GAS Circuit Metrics (1 Grover Step) ===
+Qubits: 10
+Depth (decomposed): 20
+
+Gate Counts:
+  u: 52
+  cp: 25
+  h: 2
+  IQFT: 1
+  mcphase: 1

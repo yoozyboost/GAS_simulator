@@ -1,0 +1,10 @@
+qiskit
+qiskit-aer
+numpy
+scipy
+sympy
+matplotlib
+pyyaml
+tqdm
+pytest
+# pyqsp  # QSPの角度計算に使用予定
