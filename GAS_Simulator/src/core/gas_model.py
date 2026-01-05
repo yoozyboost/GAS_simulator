@@ -1,5 +1,5 @@
 import numpy as np
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit,transpile
 from qiskit.quantum_info import Statevector
 
 from oracles import ORACLE_FACTORY
@@ -105,7 +105,6 @@ class GASModel:
         if 'qsp_params' in self.config['algorithm']:
             build_kwargs.update(self.config['algorithm']['qsp_params'])
 
-        # 修正: ここでも kwargs から obj_fun_str を除外
         prep_kwargs = {k: v for k, v in build_kwargs.items() if k != 'obj_fun_str'}
         qc_s = oracle_builder.build_state_prep(self.n_key, self.obj_fun_str, state_prep_method, **prep_kwargs)
         
@@ -142,16 +141,43 @@ class GASModel:
             
         elif self.backend_type == "qasm":
             return self._run_qasm(qc)
+        
+    def transpile_circuit(self, qc: QuantumCircuit) -> QuantumCircuit:
+        """YAML設定に基づいて回路を最適化・分解する"""
+        # None対策: キーがあって値が空(None)の場合も {} として扱う
+        eval_config = self.config.get('circuit_evaluation') or {}
+        
+        opt_level = eval_config.get('optimization_level', 1)
+        basis_gates = eval_config.get('basis_gates', None)
+        
+        transpiled_qc = transpile(
+            qc, 
+            basis_gates=basis_gates, 
+            optimization_level=opt_level
+        )
+        return transpiled_qc
 
     def get_circuit_metrics(self, threshold: float, rotation_count: int):
-        qc = self.construct_circuit(threshold, rotation_count)
-        decomposed = qc.decompose()
-        return {
-            'depth': decomposed.depth(),
-            'gate_count': dict(decomposed.count_ops()),
-            'qubits': qc.num_qubits
-        }
+        # まず論理回路を構築
+        raw_qc = self.construct_circuit(threshold, rotation_count)
 
+        if 'circuit_evaluation' in self.config:
+            # 指定あり -> トランスパイル実施
+            qc = self.transpile_circuit(raw_qc)
+            config_info = self.config['circuit_evaluation']
+        else:
+            # 指定なし -> 生の論理回路を使用 (IQFTなどがそのまま残る)
+            qc = raw_qc
+            config_info = "None (Raw Logical Circuit)"
+        # -----------------------------------------------------------
+        
+        return {
+            'depth': qc.depth(),
+            'gate_count': dict(qc.count_ops()),
+            'qubits': qc.num_qubits,
+            'config': config_info
+        }
+    
     def _run_qasm(self, qc):
         from qiskit import transpile
         from qiskit_aer import Aer

@@ -13,13 +13,9 @@ class DickeStateBuilder(StatePrepBuilder):
         if k is None:
             raise ValueError("Dicke state requires parameter 'k' (hamming weight).")
         
-        # 回路に名前をつける
         qc = self._construct_dicke_state(n_qubits, k)
         qc.name = f"Dicke(n={n_qubits},k={k})"
         return qc
-
-    # 以下、dicke.py からの移植メソッド群
-    # self._method_name の形に変更しています
 
     def _construct_dicke_state(self, n: int, k: int) -> QuantumCircuit:
         if not k <= n:

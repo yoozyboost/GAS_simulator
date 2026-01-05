@@ -1,0 +1,31 @@
+experiment_name: "analytical_benchmark_n8"
+
+problem:
+  # Analyticalモードなら n_key=10~20 程度でも数秒〜数分で終わります。
+  # (ただし n_key > 25 になると正解データの事前全探索計算が重くなるので注意)
+  n_key: 8
+  
+  # 少し複雑な目的関数（局所解ができやすい構造）
+  objective_function: "x0 + x1 - 2*x2*x3 + 1.5*x4 - x5*x6 + 0.5*x7"
+  variable_type: "binary"
+
+algorithm:
+  method: "qd" # Analyticalの場合、ここでの指定は「回路規模見積もり」に使われます
+  initial_state: "hadamard"
+
+execution:
+  # 高速なので、100回〜1000回回して滑らかなCDF（成功確率分布）を作れます
+  num_trials: 50
+
+simulation:
+  # 【重要】ここを "analytical" にする
+  backend: "analytical"
+  
+  # 探索空間 N=2^12=4096 の場合、Groverの最適回数は (pi/4)*sqrt(N) ≈ 50回
+  # 余裕を持って少し多めに設定します
+  max_iterations: 256
+
+# Analyticalモードでも、回路を作った場合の規模見積もりは出力されます
+circuit_evaluation:
+  optimization_level: 1
+  basis_gates: ["cx", "rz", "sx", "x", "id"]

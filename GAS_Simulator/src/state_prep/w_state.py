@@ -10,7 +10,6 @@ class WStateBuilder(StatePrepBuilder):
         return self._construct_w_state(n_qubits)
 
     def _construct_w_state(self, n: int) -> QuantumCircuit:
-        # 元の wstate.py のロジック
         qc = QuantumCircuit(n, name="WState")
         if n == 0:
             return qc
