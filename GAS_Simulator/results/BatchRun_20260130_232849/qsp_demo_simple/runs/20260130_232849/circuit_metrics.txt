@@ -1,0 +1,14 @@
+=== GAS Circuit Metrics (1 Grover Step) ===
+Evaluation Mode: Raw (Logical Structure)
+
+Results:
+  Qubits: 5
+  Depth: 403
+
+Gate Counts:
+  ccircuit-169: 79
+  ccircuit-170: 79
+  h: 20
+  mcx: 1
+  rx: 80
+  x: 168

@@ -15,6 +15,7 @@ def main():
         # "config/qsp_spin.yaml",  # シナリオ2
         # "config/exp_another_test.yaml",
         # "config/analytical.yaml"  # Analyticalモードのベンチマーク
+        # "config/qd_binary.yaml",
     ]
 
     # バッチ実行クラスを呼び出す

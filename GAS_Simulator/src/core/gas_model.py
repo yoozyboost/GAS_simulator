@@ -1,230 +1,341 @@
+# GAS_Simulator/src/core/gas_model.py
+
+from __future__ import annotations
+
+from typing import Any, Dict, Tuple, Optional
+
 import numpy as np
-from qiskit import QuantumCircuit,transpile
+
+from qiskit import QuantumCircuit, transpile
 from qiskit.quantum_info import Statevector
+from qiskit_aer import AerSimulator
 
 from oracles import ORACLE_FACTORY
 from state_prep import STATE_PREP_FACTORY
-from utils.math_tools import evaluate_obj, calc_obj_fun_distribution
+
+from engines.qd_nocircuit import QDNoCircuitEngine
+from engines.qsp_nocircuit import QSPNoCircuitEngine
+
 
 class GASModel:
-    def __init__(self, config):
+    """
+    GAS の「モデル」層。
+    - 回路資産（回路図・コスト評価用）はデフォルトで構築する。
+    - 収束評価（trialを回してbest曲線を見る）はデフォルトで回路なし backend を用いる。
+    """
+
+    def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.n_key = config['problem']['n_key']
-        self.obj_fun_str = config['problem']['objective_function']
-        self.var_type = config['problem'].get('variable_type', 'binary')
-        self.method = config['algorithm']['method'] 
-        self.init_state_name = config['algorithm'].get('initial_state', 'uniform')
-        self.backend_type = config['simulation']['backend']
-        self.n_val = config['problem'].get('n_val', 5) if self.method == 'qd' else 0
-        self.analytical_data = None
 
-    def _prepare_analytical_data(self):
-        if self.analytical_data is None:
-            vals, cum_counts, memo = calc_obj_fun_distribution(
-                self.n_key, self.obj_fun_str, self.var_type
+        # --- problem ---
+        prob = config.get("problem", {})
+        self.n_key = int(prob.get("n_key", 2))
+        self.n_val = int(prob.get("n_val", 5))  # QD用。QSPでは使わないが保持
+        self.obj_fun_str = str(prob.get("objective_function", "x0 + x1"))
+        self.var_type = str(prob.get("variable_type", "binary"))  # "binary" or "spin"
+
+        # --- algorithm ---
+        algo = config.get("algorithm", {})
+        self.method = str(algo.get("method", "qd"))  # "qd" or "qsp"
+        self.state_prep_name = str(algo.get("initial_state", "uniform"))
+        self.state_prep_params = algo.get("state_prep_params", {}) or {}
+        self.qsp_params = algo.get("qsp_params", {}) or {}
+
+        # --- simulation ---
+        simcfg = config.get("simulation", {})
+        # backend は「回路を実際に実行する場合の方式」だが、過去設定との互換のため
+        # backend="analytical" を指定された場合は convergence_backend="nocircuit" とみなし、
+        # QD は qd_nocircuit_mode="infinite" をデフォルトに寄せる。
+        self.backend = str(simcfg.get("backend", "statevector"))  # "statevector" or "qasm" or legacy "analytical"
+        self.convergence_backend = str(simcfg.get("convergence_backend", "nocircuit"))
+        self.max_iterations = int(simcfg.get("max_iterations", 30))
+        self.seed = simcfg.get("seed", None)
+
+        # 収束シミュレーション用の乱数。
+        # runner.py 側でも rng を持つが、モデル単体利用とテストのためここでも保持する。
+        self._rng = np.random.default_rng(self.seed)
+
+        # QD 回路なしモード
+        self.qd_nocircuit_mode = str(simcfg.get("qd_nocircuit_mode", "fejer"))
+
+        # legacy analytical モードの吸収
+        if self.backend == "analytical":
+            self.convergence_backend = "nocircuit"
+            if self.method == "qd" and ("qd_nocircuit_mode" not in simcfg):
+                self.qd_nocircuit_mode = "infinite"
+            # backend は回路実行系にのみ影響するので、ここでは statevector に寄せる
+            self.backend = "statevector"
+
+        # --- factories ---
+        if self.method not in ORACLE_FACTORY:
+            raise ValueError(f"Unknown method: {self.method}")
+        if self.state_prep_name not in STATE_PREP_FACTORY:
+            raise ValueError(f"Unknown initial_state: {self.state_prep_name}")
+
+        self.oracle_builder = ORACLE_FACTORY[self.method]()
+        self.state_prep_method = STATE_PREP_FACTORY[self.state_prep_name]()
+
+        # --- circuit assets ---
+        assets = config.get("circuit_assets", {}) or {}
+        self.build_circuit_assets = bool(assets.get("build", True))
+
+        self.qc_s: Optional[QuantumCircuit] = None
+        self.qc_o: Optional[QuantumCircuit] = None
+        self.qc_diff: Optional[QuantumCircuit] = None
+        self.qc_grover: Optional[QuantumCircuit] = None
+        self.qc_full_1step: Optional[QuantumCircuit] = None
+
+        if self.build_circuit_assets:
+            self._build_default_circuit_assets()
+
+        # --- QD nocircuit engine ---
+        self._qd_engine: Optional[QDNoCircuitEngine] = None
+        if self.method == "qd":
+            self._qd_engine = QDNoCircuitEngine.build(
+                n_key=int(self.n_key),
+                n_val=int(self.n_val),
+                objfunstr=str(self.obj_fun_str),
+                var_type=str(self.var_type),
+                init_state=str(self.state_prep_name),
+                state_prep_params=self.state_prep_params,
+                mode=str(self.qd_nocircuit_mode),
             )
-            self.analytical_data = {
-                'values': vals,
-                'cum_counts': cum_counts,
-                'memo': memo,
-                'total_count': cum_counts[-1]
-            }
 
-    def construct_circuit(self, threshold: float, rotation_count: int) -> QuantumCircuit:
-        
-        # 1. コンポーネントのビルド
-        oracle_builder = ORACLE_FACTORY[self.method]()
-        state_prep_method = STATE_PREP_FACTORY[self.init_state_name]()
-        
-        # kwargsの準備 (QD/QSP共通で渡すもの、個別で使うもの)
-        build_kwargs = {
-            'n_val': self.n_val,
-            'is_spin': (self.var_type == 'spin'),
-            'threshold': threshold,
-            'obj_fun_str': self.obj_fun_str # QSPのOracle構築には必要
-        }
-        if 'qsp_params' in self.config['algorithm']:
-            build_kwargs.update(self.config['algorithm']['qsp_params'])
+        # --- QSP nocircuit engine ---
+        self._qsp_engine: Optional[QSPNoCircuitEngine] = None
+        if self.method == "qsp":
+            # diffuser 反射の基準状態 |psi_ref> は state_prep 回路から一度だけ作る
+            qc_s = self._build_state_prep(threshold=0.0)  # threshold依存しないので0でよい
+            psi_ref = Statevector.from_instruction(qc_s.decompose(reps=10)).data
+            qsp_degree = int(self.qsp_params.get("qsp_degree", 9))
 
-        # --- A (State Prep) の構築 ---
-        # 修正: build_state_prep は obj_fun_str を引数で取るため、kwargsからは除外して渡す
-        prep_kwargs = {k: v for k, v in build_kwargs.items() if k != 'obj_fun_str'}
-        qc_s = oracle_builder.build_state_prep(self.n_key, self.obj_fun_str, state_prep_method, **prep_kwargs)
-        
-        # --- O (Oracle) の構築 ---
-        # build_oracle は kwargs から obj_fun_str を取る設計(QSP)なので、そのまま渡す
-        qc_o = oracle_builder.build_oracle(self.n_key, **build_kwargs)
-        
-        # --- D (Diffuser) の構築 ---
-        # D = U_s (2|0><0| - I) U_s^dagger
-        n_qubits = qc_s.num_qubits
-        qc_diff = QuantumCircuit(n_qubits, name="Diffuser")
-        
-        # A^dagger
-        qc_diff.compose(qc_s.inverse(), inplace=True)
-        
-        # Reflection about |0...0>
-        qc_diff.x(range(n_qubits))
-        qc_diff.h(n_qubits - 1)
-        qc_diff.mcx(list(range(n_qubits - 1)), n_qubits - 1)
-        qc_diff.h(n_qubits - 1)
-        qc_diff.x(range(n_qubits))
-        
-        # A
-        qc_diff.compose(qc_s, inplace=True)
-        
-        # --- 回路結合 ---
-        total_qubits = max(qc_s.num_qubits, qc_o.num_qubits)
-        total_qc = QuantumCircuit(total_qubits)
-        
-        # 初期状態: A |0>
-        total_qc.compose(qc_s, inplace=True)
-        
-        # Grover Operator: G = A D A^dagger O
-        grover_op = QuantumCircuit(total_qubits, name="G")
-        grover_op.compose(qc_o, inplace=True)
-        grover_op.compose(qc_diff, inplace=True)
-        
-        for _ in range(rotation_count):
-            total_qc.compose(grover_op, inplace=True)
-            
-        return total_qc
+            self._qsp_engine = QSPNoCircuitEngine(
+                n_key=self.n_key,
+                obj_fun_str=self.obj_fun_str,
+                qsp_degree=qsp_degree,
+                var_type=self.var_type,
+                psi_ref=psi_ref,
+                seed=self.seed,
+            )
 
-    def get_components_for_visualization(self):
-        """可視化用コンポーネント取得"""
-        threshold = 0.0
-        oracle_builder = ORACLE_FACTORY[self.method]()
-        state_prep_method = STATE_PREP_FACTORY[self.init_state_name]()
-        
-        build_kwargs = {
-            'n_val': self.n_val,
-            'is_spin': (self.var_type == 'spin'),
-            'threshold': threshold,
-            'obj_fun_str': self.obj_fun_str
-        }
-        if 'qsp_params' in self.config['algorithm']:
-            build_kwargs.update(self.config['algorithm']['qsp_params'])
+    # -------------------------
+    # circuit construction
+    # -------------------------
 
-        prep_kwargs = {k: v for k, v in build_kwargs.items() if k != 'obj_fun_str'}
-        qc_s = oracle_builder.build_state_prep(self.n_key, self.obj_fun_str, state_prep_method, **prep_kwargs)
-        
-        # Oracle構築にはそのまま渡す
-        qc_o = oracle_builder.build_oracle(self.n_key, **build_kwargs)
-        
-        qc_grover = self.construct_circuit(threshold, rotation_count=1)
-        
-        return {
-            "state_prep": qc_s,
-            "oracle": qc_o,
-            "full_circuit_1step": qc_grover
-        }
+    def _build_state_prep(self, threshold: float) -> QuantumCircuit:
+        """
+        oracle_builder 側の build_state_prep を呼び、キーワード引数で統一する。
+        """
+        kwargs: Dict[str, Any] = {}
+        if self.method == "qd":
+            kwargs["n_val"] = int(self.n_val)
+            kwargs["is_spin"] = (self.var_type == "spin")
+            kwargs["threshold"] = float(threshold)
+            kwargs.update(self.state_prep_params)
+            return self.oracle_builder.build_state_prep(
+                n_key=int(self.n_key),
+                obj_fun_str=self.obj_fun_str,
+                state_prep_method=self.state_prep_method,
+                **kwargs,
+            )
 
-    def run_step_circuit(self, threshold: float, rotation_count: int):
-        qc = self.construct_circuit(threshold, rotation_count)
-        
-        if self.backend_type == "statevector":
-            qc.remove_final_measurements()
-            sv = Statevector(qc)
-            
-            full_probs = sv.probabilities()
-            key_probs = np.zeros(2**self.n_key)
-            
-            for i, p in enumerate(full_probs):
-                if p == 0: continue
-                key_idx = i & ((1 << self.n_key) - 1)
-                key_probs[key_idx] += p
-                
-            key_probs /= np.sum(key_probs)
-            idx = np.random.choice(len(key_probs), p=key_probs)
-            bitstring = format(idx, f'0{self.n_key}b')
-            return bitstring[::-1]
-            
-        elif self.backend_type == "qasm":
-            return self._run_qasm(qc)
-        
-    def transpile_circuit(self, qc: QuantumCircuit) -> QuantumCircuit:
-        """YAML設定に基づいて回路を最適化・分解する"""
-        # None対策: キーがあって値が空(None)の場合も {} として扱う
-        eval_config = self.config.get('circuit_evaluation') or {}
-        
-        opt_level = eval_config.get('optimization_level', 1)
-        basis_gates = eval_config.get('basis_gates', None)
-        
-        transpiled_qc = transpile(
-            qc, 
-            basis_gates=basis_gates, 
-            optimization_level=opt_level
+        # qsp
+        kwargs.update(self.state_prep_params)
+        return self.oracle_builder.build_state_prep(
+            n_key=int(self.n_key),
+            obj_fun_str=self.obj_fun_str,
+            state_prep_method=self.state_prep_method,
+            **kwargs,
         )
-        return transpiled_qc
 
-    def get_circuit_metrics(self, threshold: float, rotation_count: int):
-        # まず論理回路を構築
-        raw_qc = self.construct_circuit(threshold, rotation_count)
+    def _build_oracle(self, threshold: float) -> QuantumCircuit:
+        if self.method == "qd":
+            return self.oracle_builder.build_oracle(
+                n_key=int(self.n_key),
+                obj_fun_str=self.obj_fun_str,
+                threshold=float(threshold),
+                n_val=int(self.n_val),
+                is_spin=(self.var_type == "spin"),
+            )
 
-        if 'circuit_evaluation' in self.config:
-            # 指定あり -> トランスパイル実施
-            qc = self.transpile_circuit(raw_qc)
-            config_info = self.config['circuit_evaluation']
-        else:
-            # 指定なし -> 生の論理回路を使用 (IQFTなどがそのまま残る)
-            qc = raw_qc
-            config_info = "None (Raw Logical Circuit)"
-        # -----------------------------------------------------------
-        
-        return {
-            'depth': qc.depth(),
-            'gate_count': dict(qc.count_ops()),
-            'qubits': qc.num_qubits,
-            'config': config_info
-        }
-    
-    def _run_qasm(self, qc):
-        from qiskit import transpile
-        from qiskit_aer import Aer
-        qc.measure_all()
-        backend = Aer.get_backend('qasm_simulator')
-        job = backend.run(transpile(qc, backend), shots=self.config['simulation'].get('shots', 1024))
-        counts = job.result().get_counts()
-        key_counts = {}
-        for k, v in counts.items():
-            key_part = k[-self.n_key:] 
-            key_counts[key_part] = key_counts.get(key_part, 0) + v
-        measured_state = max(key_counts, key=key_counts.get)
-        return measured_state[::-1]
-    
-    def run_step_analytical(self, threshold: float, rotation_count: int):
-        self._prepare_analytical_data()
-        
-        vals = self.analytical_data['values']
-        cum_counts = self.analytical_data['cum_counts']
-        total_N = self.analytical_data['total_count']
-        
-        import bisect
-        idx = bisect.bisect_left(vals, threshold)
-        
-        if idx == 0:
-            M = 0 
-        else:
-            M = cum_counts[idx - 1]
-            
-        theta = np.arcsin(np.sqrt(M / total_N))
-        prob_success = np.sin((2 * rotation_count + 1) * theta) ** 2
-        
-        if np.random.random() < prob_success and M > 0:
-            rand_idx = np.random.randint(1, M + 1)
-            val_idx = bisect.bisect_left(cum_counts, rand_idx)
-            sampled_val = vals[val_idx]
-        else:
-            if total_N == M:
-                 rand_idx = np.random.randint(1, M + 1)
-                 val_idx = bisect.bisect_left(cum_counts, rand_idx)
-                 sampled_val = vals[val_idx]
-            else:
-                rand_idx = np.random.randint(M + 1, total_N + 1)
-                val_idx = bisect.bisect_left(cum_counts, rand_idx)
-                sampled_val = vals[val_idx]
-                
-        candidates = self.analytical_data['memo'][sampled_val]
-        chosen_int = np.random.choice(candidates)
-        bitstring = format(chosen_int, f'0{self.n_key}b')
-        return bitstring[::-1]
+        # qsp
+        qsp_degree = int(self.qsp_params.get("qsp_degree", 9))
+        return self.oracle_builder.build_oracle(
+            n_key=int(self.n_key),
+            obj_fun_str=self.obj_fun_str,
+            threshold=float(threshold),
+            qsp_degree=qsp_degree,
+        )
+
+    @staticmethod
+    def _build_diffuser(n_qubits: int) -> QuantumCircuit:
+        """
+        標準 diffuser: 2|0><0| - I を実装する回路。
+        Grover step 全体では S ... S^\dagger の共役で 2|psi><psi| - I になる。
+        """
+        n = int(n_qubits)
+        qc = QuantumCircuit(n, name="Diffuser")
+        if n == 1:
+            qc.z(0)
+            return qc
+
+        qc.h(range(n))
+        qc.x(range(n))
+        qc.h(n - 1)
+        qc.mcx(list(range(n - 1)), n - 1)
+        qc.h(n - 1)
+        qc.x(range(n))
+        qc.h(range(n))
+        return qc
+
+    def construct_circuit(self, threshold: float, rotation_count: int) -> Tuple[QuantumCircuit, QuantumCircuit, QuantumCircuit, QuantumCircuit, QuantumCircuit]:
+        qc_s = self._build_state_prep(threshold=float(threshold))
+        qc_o = self._build_oracle(threshold=float(threshold))
+
+        n_qubits = qc_o.num_qubits
+        qc_diff = self._build_diffuser(n_qubits)
+
+        # Grover step: S -> O -> S^\dagger -> Diff
+        qc_g = QuantumCircuit(n_qubits, name="GroverStep")
+        qc_g.compose(qc_s, inplace=True)
+        qc_g.compose(qc_o, inplace=True)
+        qc_g.compose(qc_s.inverse(), inplace=True)
+        qc_g.compose(qc_diff, inplace=True)
+
+        # full circuit with rotation_count repetitions
+        qc_full = QuantumCircuit(n_qubits, name="full_circuit_1step")
+        for _ in range(int(rotation_count)):
+            qc_full.compose(qc_g, inplace=True)
+
+        return qc_s, qc_o, qc_diff, qc_g, qc_full
+
+    def _build_default_circuit_assets(self):
+        qc_s, qc_o, qc_diff, qc_g, qc_full = self.construct_circuit(threshold=0.0, rotation_count=1)
+
+        # 名前は既存の出力と合わせる（Aerが嫌うときはdecomposeして実行側で潰す）
+        qc_s.name = "StatePrep"
+        qc_o.name = "Oracle"
+        qc_diff.name = "Diffuser"
+        qc_g.name = "GroverStep"
+        qc_full.name = "full_circuit_1step"
+
+        self.qc_s = qc_s
+        self.qc_o = qc_o
+        self.qc_diff = qc_diff
+        self.qc_grover = qc_g
+        self.qc_full_1step = qc_full
+
+    def get_components_for_visualization(self) -> Dict[str, QuantumCircuit]:
+        out: Dict[str, QuantumCircuit] = {}
+        if self.qc_s is not None:
+            out["StatePrep"] = self.qc_s
+        if self.qc_o is not None:
+            out["Oracle"] = self.qc_o
+        if self.qc_diff is not None:
+            out["Diffuser"] = self.qc_diff
+        if self.qc_grover is not None:
+            out["GroverStep"] = self.qc_grover
+        if self.qc_full_1step is not None:
+            out["full_circuit_1step"] = self.qc_full_1step
+        return out
+
+    # -------------------------
+    # execution backends
+    # -------------------------
+
+    def run_step(self, threshold: float, rotation_count: int) -> str:
+        if self.convergence_backend == "circuit":
+            return self.run_step_circuit(threshold, rotation_count)
+        return self.run_step_nocircuit(threshold, rotation_count)
+
+    def run_step_circuit(self, threshold: float, rotation_count: int) -> str:
+        """
+        回路ありで 1 step サンプリング。
+        AerError 'unknown instruction: StatePrep' を避けるため、
+        実行前に decompose を必ず挟む。
+        """
+        _, _, _, _, qc_full = self.construct_circuit(threshold=float(threshold), rotation_count=int(rotation_count))
+
+        # Aerが嫌う named Instruction を落とす
+        qc_full = qc_full.decompose(reps=10)
+
+        n_key = self.n_key
+
+        # statevector は Aer を使わず Statevector に寄せる方が安定
+        if self.backend == "statevector":
+            sv = Statevector.from_instruction(qc_full)
+            probs = np.abs(sv.data) ** 2
+
+            # QSP: ancilla を周辺化して key 分布にする
+            if self.method == "qsp":
+                n = 1 << n_key
+                p_key = probs[:n] + probs[n: n + n]
+                p_key = p_key / p_key.sum()
+                idx = int(self._rng.choice(n, p=p_key))
+                return format(idx, f"0{n_key}b")[::-1]
+
+            # QD: key は下位 n_key ビット
+            n = 1 << n_key
+            p_key = np.zeros(n, dtype=np.float64)
+            for basis_idx, p in enumerate(probs):
+                key_idx = basis_idx & (n - 1)
+                p_key[key_idx] += float(p)
+            p_key = p_key / p_key.sum()
+            idx = int(self._rng.choice(n, p=p_key))
+            return format(idx, f"0{n_key}b")[::-1]
+
+        # qasm backend
+        qc_full.measure_all()
+        sim = AerSimulator()
+        qc_full = transpile(qc_full, sim, optimization_level=0)
+        result = sim.run(qc_full, shots=1).result()
+        counts = result.get_counts()
+        bitstr = next(iter(counts.keys()))
+
+        # qiskit counts は classical bit の順が回路依存なので、ここでは安全策として key 部分を右から取る
+        # ancilla/val を含む場合でも、末尾 n_key を key として読む
+        key_bits = bitstr.replace(" ", "")[-n_key:]
+        return key_bits[::-1]
+
+    def transpile_circuit(self, qc: QuantumCircuit) -> QuantumCircuit:
+        """circuit_evaluation 設定に基づきトランスパイルした回路を返す。"""
+        eval_config = self.config.get("circuit_evaluation") or {}
+        opt_level = int(eval_config.get("optimization_level", 1))
+        basis_gates = eval_config.get("basis_gates", None)
+
+        # Aer が嫌う named Instruction を落とす
+        qc2 = qc.decompose(reps=10)
+        sim = AerSimulator()
+
+        if basis_gates is None or basis_gates == "Default":
+            return transpile(qc2, sim, optimization_level=opt_level)
+        return transpile(qc2, sim, optimization_level=opt_level, basis_gates=list(basis_gates))
+
+    def run_step_nocircuit(self, threshold: float, rotation_count: int, rng: Optional[np.random.Generator] = None) -> str:
+        """
+        回路なしで 1 step サンプリング。
+        QSP は engines/qsp_nocircuit.py を使用する。
+        """
+        if rng is None:
+            rng = self._rng
+
+        if self.method == "qsp":
+            if self._qsp_engine is None:
+                raise RuntimeError("QSPNoCircuitEngine is not initialized.")
+            bitstr, _ = self._qsp_engine.sample_key_bitstring(
+                threshold=float(threshold),
+                rotation_count=int(rotation_count),
+                initial_state=None,
+                rng=rng,
+            )
+
+            return bitstr
+
+        # QD
+        if self._qd_engine is None:
+            raise RuntimeError("QDNoCircuitEngine is not initialized.")
+        return self._qd_engine.sample_key_bitstring(
+            threshold=float(threshold),
+            rotation_count=int(rotation_count),
+            rng=rng,
+        )

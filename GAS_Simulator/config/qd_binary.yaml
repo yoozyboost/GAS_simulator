@@ -1,0 +1,34 @@
+experiment_name: qd_demo_simple
+
+problem:
+  n_key: 4
+  n_val: 6
+  objective_function: x0 + 2*x1 + x2 + x0*x3
+  variable_type: binary
+
+algorithm:
+  method: qd
+  initial_state: uniform
+  # dicke_state等を使うなら state_prep_params を追加する
+  # state_prep_params:
+  #   k: 3
+
+simulation:
+  backend: statevector
+  # convergence_backend を書かなければ nocircuit が選ばれる想定
+  convergence_backend: nocircuit
+  qd_nocircuit_mode: fejer
+  max_iterations: 50
+  seed: 0
+
+execution:
+  num_trials: 30
+
+circuit_assets:
+  build: true
+
+# 回路コスト評価をトランスパイル後でやりたい場合は、あなたの実装に合わせて追加
+# circuit_evaluation:
+#   do_transpile: true
+#   optimization_level: 1
+#   basis_gates: ["cx", "rz", "sx", "x"]

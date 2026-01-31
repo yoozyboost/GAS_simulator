@@ -7,4 +7,4 @@ matplotlib
 pyyaml
 tqdm
 pytest
-# pyqsp  # QSPの角度計算に使用予定
+pyqsp==0.2.0

@@ -9,3 +9,9 @@ STATE_PREP_FACTORY = {
     "w_state": WStateBuilder,
     "dicke": DickeStateBuilder
 }
+
+def get_state_prep_method(name: str):
+    """STATE_PREP_FACTORYからビルダを生成して返すヘルパ"""
+    if name not in STATE_PREP_FACTORY:
+        raise KeyError(f"Unknown initial_state: {name}")
+    return STATE_PREP_FACTORY[name]()

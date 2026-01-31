@@ -1,43 +1,82 @@
 import sys
 import os
-import pytest
 from qiskit import QuantumCircuit
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
+
 from oracles import ORACLE_FACTORY
+from state_prep import STATE_PREP_FACTORY
 
-def test_qd_oracle_binary():
-    builder = ORACLE_FACTORY["qd"]()
-    # 2変数 x0 + x1, 値レジスタ3qubit
-    qc = builder.build(n_key=2, obj_fun_str="x0 + x1", n_val=3, is_spin=False)
-    
-    # Check circuit size: n_key(2) + n_val(3) = 5
-    assert qc.num_qubits == 5
-    print("\nQD(Binary) Oracle Created successfully.")
 
-def test_qd_oracle_spin():
-    builder = ORACLE_FACTORY["qd"]()
-    # 2変数, Spin
-    qc = builder.build(n_key=2, obj_fun_str="x0 + x1", n_val=3, is_spin=True)
-    assert qc.num_qubits == 5
-    print("QD(Spin) Oracle Created successfully.")
+def test_qd_oracle_and_stateprep_binary():
+    oracle_builder = ORACLE_FACTORY["qd"]()
+    state_prep = STATE_PREP_FACTORY["uniform"]()
 
-def test_qsp_oracle():
-    builder = ORACLE_FACTORY["qsp"]()
-    # 2変数, 閾値 0.5
-    qc = builder.build(n_key=2, obj_fun_str="x0 + x1", threshold=0.5, qsp_degree=10)
-    
-    # Check circuit size: n_key(2) + ancilla(1) = 3
-    assert qc.num_qubits == 3
-    print("QSP Oracle Created successfully.")
+    n_key = 2
+    n_val = 3
 
-if __name__ == "__main__":
-    try:
-        test_qd_oracle_binary()
-        test_qd_oracle_spin()
-        test_qsp_oracle()
-        print("All Oracle tests passed!")
-    except Exception as e:
-        print(f"Test failed: {e}")
-        import traceback
-        traceback.print_exc()
+    qc_s = oracle_builder.build_state_prep(
+        n_key=n_key,
+        obj_fun_str="x0 + x1",
+        state_prep_method=state_prep,
+        n_val=n_val,
+        is_spin=False,
+        threshold=0.0,
+    )
+    qc_o = oracle_builder.build_oracle(
+        n_key=n_key,
+        n_val=n_val,
+        is_spin=False,
+        threshold=0.0,
+    )
+
+    assert qc_s.num_qubits == n_key + n_val
+    assert qc_o.num_qubits == n_key + n_val
+
+
+def test_qd_oracle_and_stateprep_spin():
+    oracle_builder = ORACLE_FACTORY["qd"]()
+    state_prep = STATE_PREP_FACTORY["uniform"]()
+
+    n_key = 2
+    n_val = 3
+
+    qc_s = oracle_builder.build_state_prep(
+        n_key=n_key,
+        obj_fun_str="x0 + x1",
+        state_prep_method=state_prep,
+        n_val=n_val,
+        is_spin=True,
+        threshold=0.0,
+    )
+    qc_o = oracle_builder.build_oracle(
+        n_key=n_key,
+        n_val=n_val,
+        is_spin=True,
+        threshold=0.0,
+    )
+
+    assert qc_s.num_qubits == n_key + n_val
+    assert qc_o.num_qubits == n_key + n_val
+
+
+def test_qsp_oracle_and_stateprep():
+    oracle_builder = ORACLE_FACTORY["qsp"]()
+    state_prep = STATE_PREP_FACTORY["uniform"]()
+
+    n_key = 2
+
+    qc_s = oracle_builder.build_state_prep(
+        n_key=n_key,
+        obj_fun_str="x0 + x1",
+        state_prep_method=state_prep,
+    )
+    qc_o = oracle_builder.build_oracle(
+        n_key=n_key,
+        obj_fun_str="x0 + x1",
+        threshold=0.5,
+        qsp_degree=9,
+    )
+
+    assert qc_s.num_qubits == n_key + 1
+    assert qc_o.num_qubits == n_key + 1

@@ -1,0 +1,16 @@
+=== GAS Circuit Metrics (1 Grover Step) ===
+Evaluation Mode: Transpiled (Physical/Optimized)
+Configuration:
+  Optimization Level: 1
+  Basis Gates: Default
+
+Results:
+  Qubits: 5
+  Depth: 5121
+
+Gate Counts:
+  cx: 3196
+  u: 3258
+  u1: 166
+  u2: 174
+  u3: 82
