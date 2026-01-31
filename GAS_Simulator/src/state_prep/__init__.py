@@ -7,8 +7,10 @@ STATE_PREP_FACTORY = {
     "uniform": UniformStateBuilder,
     "hadamard": UniformStateBuilder, # alias
     "w_state": WStateBuilder,
+    "w": WStateBuilder,              # alias
     "dicke": DickeStateBuilder
 }
+
 
 def get_state_prep_method(name: str):
     """STATE_PREP_FACTORYからビルダを生成して返すヘルパ"""

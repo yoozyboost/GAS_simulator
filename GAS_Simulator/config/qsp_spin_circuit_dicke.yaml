@@ -1,4 +1,4 @@
-experiment_name: qsp_nocircuit_spin_example
+experiment_name: qsp_circuit_spin_example
 
 problem:
   n_key: 4
@@ -7,20 +7,21 @@ problem:
 
 algorithm:
   method: qsp
-  initial_state: uniform
-  # state_prep_params: 
-    # k : 
+  initial_state: dicke
+  # dicke_state等を使うなら state_prep_params を追加する
+  state_prep_params:
+    k: 4
   qsp_params:
     qsp_degree: 9
 
 simulation:
-  convergence_backend: nocircuit
+  convergence_backend: circuit
   backend: statevector
   max_iterations: 20
-  seed: 1
+  seed: 123
 
 execution:
-  num_trials: 100
+  num_trials: 10
 
 circuit_assets:
   build: false

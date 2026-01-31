@@ -3,6 +3,7 @@ from qiskit import QuantumCircuit
 from functools import lru_cache
 from .base import OracleBuilder
 from utils.math_tools import str_to_sympy
+import sympy
 
 # pyqsp を使う場合の PolySign 生成パラメータ
 DEFAULT_SIGN_DELTA = 20.0
@@ -129,7 +130,8 @@ class QSPOracleBuilder(OracleBuilder):
         
         # 1. 目的関数のみをパースして係数を取得
         expr = str_to_sympy(obj_fun_str)
-        polydict = expr.as_poly().as_dict()
+        gens = [sympy.Symbol(f"x{i}") for i in range(int(n_key))]
+        polydict = sympy.Poly(expr, *gens, domain="RR").as_dict()
         
         # 2. L1ノルム (係数の絶対値和) を計算。閾値は含めない。
         l1_norm = sum(abs(k) for k in polydict.values())
@@ -157,7 +159,7 @@ class QSPOracleBuilder(OracleBuilder):
 
     def build_state_prep(self, n_key: int, obj_fun_str: str, state_prep_method, **kwargs) -> QuantumCircuit:
         qc = QuantumCircuit(n_key + 1, name="QSP_StatePrep")
-        qc_key = state_prep_method.build(n_key)
+        qc_key = state_prep_method.build(n_key, **kwargs)
         qc.compose(qc_key, range(n_key), inplace=True)
         return qc
 

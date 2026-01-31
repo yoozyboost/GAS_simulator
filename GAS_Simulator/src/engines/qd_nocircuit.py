@@ -19,6 +19,9 @@ def build_key_weights(n_key: int, init_state: str, state_prep_params: Optional[D
     """
     if state_prep_params is None:
         state_prep_params = {}
+    
+    if init_state == "w":
+        init_state = "w_state"
 
     N = 1 << n_key
     w = np.zeros(N, dtype=np.float64)

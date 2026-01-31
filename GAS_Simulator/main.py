@@ -12,13 +12,15 @@ def main():
     # ==========================================
     config_list = [
         # "config/qd_spin.yaml",   # シナリオ1
-        # "config/qsp_spin_circuit.yaml",  # シナリオ2
-        # "config/qsp_spin_nocircuit.yaml",  # シナリオ3
+        "config/qsp_spin_circuit_uniform.yaml",  # シナリオ2
+        # "config/qsp_spin_circuit_dicke.yaml",  # シナリオ2
+        "config/qsp_spin_nocircuit.yaml",  # シナリオ3
         # "config/exp_another_test.yaml",
         # "config/analytical.yaml"  # Analyticalモードのベンチマーク
-        # "config/qd_binary.yaml",
+        # "config/qd_binary_circuit.yaml",
         # "config/qd_spin.yaml"
-        "config/qd_binary_circuit.yaml",
+        # "config/qd_binary_nocircuit_uni/form.yaml",
+        # "config/qd_binary_nocircuit_dicke.yaml",
     ]
 
     # バッチ実行クラスを呼び出す

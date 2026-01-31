@@ -13,6 +13,8 @@ from qiskit_aer import AerSimulator
 from oracles import ORACLE_FACTORY
 from state_prep import STATE_PREP_FACTORY
 
+from state_prep.nocircuit import build_psi_ref
+
 from engines.qd_nocircuit import QDNoCircuitEngine
 from engines.qsp_nocircuit import QSPNoCircuitEngine
 
@@ -104,9 +106,14 @@ class GASModel:
         # --- QSP nocircuit engine ---
         self._qsp_engine: Optional[QSPNoCircuitEngine] = None
         if self.method == "qsp":
-            # diffuser 反射の基準状態 |psi_ref> は state_prep 回路から一度だけ作る
-            qc_s = self._build_state_prep(threshold=0.0)  # threshold依存しないので0でよい
-            psi_ref = Statevector.from_instruction(qc_s.decompose(reps=10)).data
+            # diffuser 反射の基準状態 |psi_ref> を回路なしで構成する。
+            # state_prep は現状 (uniform, w_state, dicke) のみをサポートし、
+            # いずれも ancilla=0 側にのみ支持を持つ。
+            psi_ref = build_psi_ref(
+                n_key=int(self.n_key),
+                initial_state=str(self.state_prep_name),
+                state_prep_params=self.state_prep_params,
+            )
             qsp_degree = int(self.qsp_params.get("qsp_degree", 9))
 
             self._qsp_engine = QSPNoCircuitEngine(
@@ -188,22 +195,40 @@ class GASModel:
         qc.h(range(n))
         return qc
 
+    @staticmethod
+    def _build_diffuser_ilquantum(n_controls: int) -> QuantumCircuit:
+        # 総量子ビット数は n_controls + 1、最後が拡散用ancilla
+        anc = n_controls
+        qc = QuantumCircuit(n_controls + 1, name="Diffuser")
+        qc.x(range(n_controls))
+        qc.x(anc)
+        qc.h(anc)
+        qc.mcx(list(range(n_controls)), anc)
+        qc.h(anc)
+        qc.x(anc)
+        qc.x(range(n_controls))
+        return qc
+
     def construct_circuit(self, threshold: float, rotation_count: int) -> Tuple[QuantumCircuit, QuantumCircuit, QuantumCircuit, QuantumCircuit, QuantumCircuit]:
         qc_s = self._build_state_prep(threshold=float(threshold))
         qc_o = self._build_oracle(threshold=float(threshold))
 
-        n_qubits = qc_o.num_qubits
-        qc_diff = self._build_diffuser(n_qubits)
+        if self.method == "qd":
+            n_controls = int(self.n_key + self.n_val)
+        else:
+            n_controls = int(self.n_key)
 
-        # Grover step: S -> O -> S^\dagger -> Diff
+        qc_diff = self._build_diffuser_ilquantum(n_controls)
+        n_qubits = n_controls + 1
+
         qc_g = QuantumCircuit(n_qubits, name="GroverStep")
-        qc_g.compose(qc_s, inplace=True)
         qc_g.compose(qc_o, inplace=True)
         qc_g.compose(qc_s.inverse(), inplace=True)
         qc_g.compose(qc_diff, inplace=True)
+        qc_g.compose(qc_s, inplace=True)
 
-        # full circuit with rotation_count repetitions
         qc_full = QuantumCircuit(n_qubits, name="full_circuit_1step")
+        qc_full.compose(qc_s, inplace=True)
         for _ in range(int(rotation_count)):
             qc_full.compose(qc_g, inplace=True)
 

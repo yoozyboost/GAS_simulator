@@ -3,6 +3,7 @@ from qiskit import QuantumCircuit
 from qiskit.circuit.library import QFT
 from .base import OracleBuilder
 from utils.math_tools import str_to_sympy
+import sympy    
 
 class QDOracleBuilder(OracleBuilder):
     
@@ -13,12 +14,9 @@ class QDOracleBuilder(OracleBuilder):
         n_val = kwargs.get('n_val', 5)
         
         # 回路サイズは n_key + n_val
-        qc = QuantumCircuit(n_key + n_val, name="QD_Oracle")
-        
-        # 値レジスタは n_key から始まる。2の補数表現のMSB(符号ビット)は n_key 番目
-        # ilquantumの実装: O.z(n_key)
+        qc = QuantumCircuit(n_key + n_val + 1, name="QD_Oracle")
         qc.z(n_key)
-        
+
         return qc
 
     def build_state_prep(self, n_key: int, obj_fun_str: str, state_prep_method, **kwargs) -> QuantumCircuit:
@@ -32,16 +30,17 @@ class QDOracleBuilder(OracleBuilder):
 
         # 式のパース: f(x) - threshold
         expr = str_to_sympy(f"({obj_fun_str}) - ({threshold})")
-        polydict = expr.as_poly().as_dict()
+        gens = [sympy.Symbol(f"x{i}") for i in range(int(n_key))]
+        polydict = sympy.Poly(expr, *gens, domain="RR").as_dict()
 
         # 1. 基本的な重ね合わせ状態の作成 (Key + Val)
         # ilquantumでは constructAy の冒頭で `A.h(range(n_key + n_val))` としている
         # Key側は W状態などを許容し、Val側は必ずHとする
         
-        qc = QuantumCircuit(n_key + n_val, name="QD_StatePrep")
+        qc = QuantumCircuit(n_key + n_val + 1, name="QD_StatePrep")
         
         # Key部分の初期化 (Uniform, W, Dickeなど)
-        qc_key_init = state_prep_method.build(n_key)
+        qc_key_init = state_prep_method.build(n_key, **kwargs)
         qc.compose(qc_key_init, range(n_key), inplace=True)
         
         # Value部分の初期化 (常にHadamard)
@@ -52,6 +51,8 @@ class QDOracleBuilder(OracleBuilder):
         # 2. 位相回転 (Phase encoding)
         if not is_spin:
             # Binary Variables
+            # print(polydict.items())
+            # exit()
             for (ps, k) in polydict.items():
                 k = float(k)
                 i_nonzero = np.nonzero(ps)[0]
