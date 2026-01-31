@@ -165,7 +165,7 @@ class QSPOracleBuilder(OracleBuilder):
         # polydictは既にスケーリング済み
         
         # 定数項の集約 (閾値分を引く)
-        Delta = -np.pi / 2 - float(scaled_threshold)
+        Delta = -np.pi / 2 - float(scaled_threshold) 
         
         O = QuantumCircuit(n_key + 1, name="QSP_Oracle")
         Wz_plus = QuantumCircuit(n_key)
@@ -208,5 +208,8 @@ class QSPOracleBuilder(OracleBuilder):
 
             
             O.rx(-2 * angles[i], ancilla)
-            
+        # nocircuit と同じ「S† + X」を末尾に付加する
+        O.sdg(ancilla)
+        O.x(ancilla)
+
         return O

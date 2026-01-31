@@ -1,0 +1,19 @@
+algorithm:
+  initial_state: uniform
+  method: qd
+circuit_assets:
+  build: true
+execution:
+  num_trials: 30
+experiment_name: qd_demo_simple
+problem:
+  n_key: 4
+  n_val: 5
+  objective_function: x0 + 2*x1 + x2 + x0*x3
+  variable_type: binary
+simulation:
+  backend: statevector
+  convergence_backend: nocircuit
+  max_iterations: 50
+  qd_nocircuit_mode: fejer
+  seed: 0

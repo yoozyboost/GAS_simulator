@@ -5,14 +5,14 @@ problem:
   objective_function: "x0 + x1 + x2 + x3"
   variable_type: "spin"
   # QD-GAS固有: 値をエンコードするレジスタ数 (精度に影響)
-  # n_val: 5
+  n_val: 5
 
 algorithm:
   method: "qd"
   initial_state: "uniform" # Hadamard
 
 execution:
-  num_trials: 20 # 確率的な挙動を平均化するため10回試行
+  num_trials: 30 # 確率的な挙動を平均化するため10回試行
 
 simulation:
   backend: "statevector" # 量子回路シミュレータを使用

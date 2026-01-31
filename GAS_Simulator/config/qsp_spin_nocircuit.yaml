@@ -1,8 +1,8 @@
 experiment_name: qsp_nocircuit_spin_example
 
 problem:
-  n_key: 4
-  objective_function: x0 + x1 + x2 + x3
+  n_key: 2
+  objective_function: x0 + x1 
   variable_type: spin
 
 algorithm:
@@ -10,16 +10,16 @@ algorithm:
   initial_state: uniform
   state_prep_params: {}
   qsp_params:
-    qsp_degree: 39
+    qsp_degree: 9
 
 simulation:
   convergence_backend: nocircuit
   backend: statevector
-  max_iterations: 16
-  seed: 123
+  max_iterations: 10
+  seed: 1
 
 execution:
-  num_trials: 10
+  num_trials: 1000
 
 circuit_assets:
   build: false

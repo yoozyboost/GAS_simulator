@@ -221,7 +221,7 @@ class QSPNoCircuitEngine:
 
         # 回路側と同じ正規化
         scaled_threshold = float(threshold) * self._poly.scale_factor
-        Delta = -np.pi / 2 - scaled_threshold + float(self._poly.const_scaled) + 0.02
+        Delta = -np.pi / 2 - scaled_threshold + float(self._poly.const_scaled) 
 
 
         # θ(z)+Δ を前計算

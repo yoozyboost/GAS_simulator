@@ -1,0 +1,20 @@
+algorithm:
+  initial_state: uniform
+  method: qsp
+  qsp_params:
+    qsp_degree: 9
+  state_prep_params: {}
+circuit_assets:
+  build: false
+execution:
+  num_trials: 1000
+experiment_name: qsp_nocircuit_spin_example
+problem:
+  n_key: 2
+  objective_function: x0 + x1
+  variable_type: spin
+simulation:
+  backend: statevector
+  convergence_backend: nocircuit
+  max_iterations: 10
+  seed: 1

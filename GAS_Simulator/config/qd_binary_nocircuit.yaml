@@ -1,8 +1,8 @@
-experiment_name: qd_demo_simple
+experiment_name: qd_binary_circuit
 
 problem:
   n_key: 4
-  n_val: 6
+  n_val: 5
   objective_function: x0 + 2*x1 + x2 + x0*x3
   variable_type: binary
 
