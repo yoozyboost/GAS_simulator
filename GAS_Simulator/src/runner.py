@@ -158,6 +158,7 @@ class GASRunner:
 
         for it in range(1, max_iter + 1):
             rotation_count = int(ceil(self.rng.uniform(0, m)))
+            # print(f"rotation_count: {rotation_count}")
             cumulative_queries += rotation_count
 
             if conv_backend == "nocircuit":
@@ -183,8 +184,8 @@ class GASRunner:
 
             history_best.append(current_y)
 
-            if no_improvement_count > 10:
-                break
+            # if no_improvement_count > 10:
+            #     break
 
         final_best = history_best[-1]
 

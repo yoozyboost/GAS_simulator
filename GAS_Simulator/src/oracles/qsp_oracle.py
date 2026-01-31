@@ -61,13 +61,17 @@ def get_sign_angles_cached(degree: int, delta: float = 20.0) -> list[float]:
         ) from e
 
     # cheb_samples は degree より大きく取る。エイリアシング回避のため。:contentReference[oaicite:1]{index=1}
-    cheb_samples = max(4 * d, d + 1, 250)
-    # cheb_samples = 4 * d
+    # cheb_samples = max(4 * d, d + 1, 250)
+    cheb_samples = 4 * d
 
+    # 固定deltaでtanh近似すると遷移幅が次数で縮まらない。
+    # 次数を上げたときに遷移幅も縮むように、内部的にはdeltaを次数に比例させる。
+    d0 = 79.0
+    delta_eff = float(delta) * (float(d) / d0)
     # tanh(delta x) を Chebyshev 近似して符号関数を作る。
     # ここでは Chebyshev 基底係数 c[0..d] を直接 pyqsp に渡す。
     x = np.cos(np.pi * (np.arange(cheb_samples) + 0.5) / cheb_samples)
-    y = np.tanh(float(delta) * x)
+    y = np.tanh(delta_eff * x)
     c = np.polynomial.chebyshev.chebfit(x, y, d)
 
     # 奇関数なので偶数次数項をゼロ化する。
@@ -77,7 +81,7 @@ def get_sign_angles_cached(degree: int, delta: float = 20.0) -> list[float]:
     grid = np.linspace(-1.0, 1.0, 4001)
     maxabs = float(np.max(np.abs(np.polynomial.chebyshev.chebval(grid, c))))
     if maxabs > 0.0:
-        c *= (0.95 / maxabs)
+        c *= (0.999 / maxabs)
 
     coeff = np.asarray(c, dtype=np.float64).reshape(-1).tolist()
 
@@ -161,8 +165,7 @@ class QSPOracleBuilder(OracleBuilder):
         # polydictは既にスケーリング済み
         
         # 定数項の集約 (閾値分を引く)
-        Delta = -scaled_threshold
-        Delta = float(Delta)
+        Delta = -np.pi / 2 - float(scaled_threshold)
         
         O = QuantumCircuit(n_key + 1, name="QSP_Oracle")
         Wz_plus = QuantumCircuit(n_key)

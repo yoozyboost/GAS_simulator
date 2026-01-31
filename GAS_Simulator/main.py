@@ -11,8 +11,9 @@ def main():
     # ここに実行・比較したい設定ファイル一覧を記述
     # ==========================================
     config_list = [
-        "config/qd_spin.yaml",   # シナリオ1
-        # "config/qsp_spin.yaml",  # シナリオ2
+        # "config/qd_spin.yaml",   # シナリオ1
+        "config/qsp_spin_circuit.yaml",  # シナリオ2
+        "config/qsp_spin_nocircuit.yaml",  # シナリオ3
         # "config/exp_another_test.yaml",
         # "config/analytical.yaml"  # Analyticalモードのベンチマーク
         # "config/qd_binary.yaml",

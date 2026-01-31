@@ -91,12 +91,12 @@ class QSPNoCircuitEngine:
 
         self._N = 1 << self.n_key
         self._indices = np.arange(self._N, dtype=np.uint64)
-        self._x_terms = self._precompute_theta(self._indices, self._poly.terms)
-        self._N = 1 << self.n_key
+
+        # θ(z)=Σ k_S prod_z(S) を前計算
+        self._theta_terms = self._precompute_theta(self._indices, self._poly.terms)
+
         self._init_reflection_fastpath()
 
-
-        self._init_reflection_fastpath()
 
     def _init_reflection_fastpath(self) -> None:
         """
@@ -161,8 +161,8 @@ class QSPNoCircuitEngine:
         if l1 == 0.0:
             l1 = 1.0
 
-        # scale_factor = float(np.pi) / (2.0 * l1)
-        scale_factor = 1.0 / (2.0 * l1)
+        scale_factor = float(np.pi) / (2.0 * l1)
+        # scale_factor = 1.0 / (2.0 * l1)
 
 
         const_scaled = 0.0
@@ -191,7 +191,7 @@ class QSPNoCircuitEngine:
         theta = np.zeros(indices.shape[0], dtype=np.float64)
         for mask, k in terms:
             prod = _parity_prod(indices, int(mask))
-            # theta += float(k) * prod
+            theta += float(k) * prod
         return theta
 
     @staticmethod
@@ -204,36 +204,48 @@ class QSPNoCircuitEngine:
         c = float(np.cos(phi))
         s = float(np.sin(phi))
         new0 = c * a0 + 1j * s * a1
-        new1 = 1j * s * a0 + c * a1
+        new1 = + 1j * s * a0 + c * a1
         return new0, new1
 
     def _apply_one_oracle(self, state: np.ndarray, threshold: float) -> np.ndarray:
         """
         qsp_oracle.py の QSP_Oracle を、状態ベクトルへ直接適用。
-        ancilla=0 ブロックに Wz_plus、ancilla=1 ブロックに Wz_minus を適用する。
+        回路側の効果は、各zについて
+        anc=0: exp(-i(θ(z)+Δ))、
+        anc=1: exp(+i(θ(z)+Δ))
+        を掛けるブロック対角演算と Rx(-2φ) の交互作用で表現できる。
         """
         n = self._N
         a0 = state[:n].copy()
         a1 = state[n:].copy()
 
+        # 回路側と同じ正規化
         scaled_threshold = float(threshold) * self._poly.scale_factor
-        Delta = -scaled_threshold + float(self._poly.const_scaled)
+        Delta = -np.pi / 2 - scaled_threshold + float(self._poly.const_scaled) + 0.02
 
-        a0, a1 = self._apply_rx_minus2phi(a0, a1, float(self.angles[0]))
 
-        # x = (f - threshold)/(2*l1) を作り、theta = arccos(x) を信号角として使う
-        x = self._x_terms + (self._poly.const_scaled - float(threshold) * self._poly.scale_factor)
-        x = np.clip(x, -1.0, 1.0)
-        theta = np.arccos(x)
-
+        # θ(z)+Δ を前計算
+        theta = self._theta_terms + Delta
         phase_plus = np.exp(-1j * theta)
         phase_minus = np.conjugate(phase_plus)
 
-        a0 *= phase_plus
-        a1 *= phase_minus
+        # QSP列
+        a0, a1 = self._apply_rx_minus2phi(a0, a1, float(self.angles[0]))
+        for i in range(1, int(self.angles.size)):
+            a0 *= phase_plus
+            a1 *= phase_minus
+            a0, a1 = self._apply_rx_minus2phi(a0, a1, float(self.angles[i]))
+
+        a0, a1 = (-1j) * a1, a0
+        
+        #S_daggerを適用　anc=1に-iを掛ける
+        # a1 = 1j * a1
+        #Xを適用　anc=0,1を入れ替え
+        # a0, a1 = a1, a0
 
 
         return np.concatenate([a0, a1], axis=0)
+
 
     def _init_reflection_fastpath(self) -> None:
         """
@@ -367,7 +379,7 @@ class QSPNoCircuitEngine:
         n = self._N
         a0 = state[:n]
         a1 = state[n:]
-        p_key = (np.abs(a0) ** 2 + np.abs(a1) ** 2).astype(np.float64)
+        p_key = (np.abs(a0) ** 2 + np.abs(a1) ** 2).astype(np.float64)  # ancilla周辺化
         s = float(p_key.sum())
         if s <= 0.0:
             p_key = np.ones_like(p_key) / float(p_key.size)
@@ -380,3 +392,134 @@ class QSPNoCircuitEngine:
 
         bitstr = format(idx, f"0{self.n_key}b")[::-1]
         return bitstr, p_key
+
+def debug_plot_qsp_sign_response(
+    degree: int,
+    delta: float = 20.0,
+    npts: int = 800,
+    x_min: float = -1.0,
+    x_max: float = 1.0,
+    theta_map: str = "arccos",
+    apply_post_sdgx: bool = True,
+    show: bool = True,
+    savepath: str | None = None,
+) -> None:
+    """
+    qsp_nocircuit が想定する QSP 角度列で，
+    x in [x_min,x_max] に対する応答を可視化するデバッグ関数。
+
+    描く量
+      1) raw の Re(U00), Im(U10)
+      2) 末尾に S† と X を付加した回路の Re(U00)（apply_post_sdgx=True のとき）
+
+    変数の定義
+      x は [-1,1] の実数入力
+      theta_map="arccos" なら theta = arccos(x)
+      theta_map="linear" なら theta = (pi/2)*x
+      Wz(theta)=diag(exp(-i theta), exp(+i theta)) を信号演算子として使う
+
+    注意
+      この関数は「角度列が実現する2×2ユニタリ」を見るためのもの。
+      GAS本体の状態更新や diffuser は関与しない。
+    """
+    import math
+    import numpy as np
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as e:
+        raise ImportError("matplotlib が必要。pip install matplotlib を実行してから再試行。") from e
+
+    d = int(degree)
+    if d % 2 == 0:
+        d += 1
+
+    angles = np.asarray(get_sign_angles_cached(d, delta=float(delta)), dtype=np.float64).reshape(-1)
+    if angles.size != d + 1:
+        raise ValueError(f"angles length mismatch: got {angles.size}, expected {d+1}")
+
+    x_grid = np.linspace(float(x_min), float(x_max), int(npts), dtype=np.float64)
+    x_clip = np.clip(x_grid, -1.0, 1.0)
+
+    if str(theta_map).lower() == "arccos":
+        theta_grid = np.arccos(x_clip)
+    elif str(theta_map).lower() == "linear":
+        theta_grid = (math.pi / 2.0) * x_clip
+    else:
+        raise ValueError("theta_map must be 'arccos' or 'linear'")
+
+    def rx_minus2phi(phi: float) -> np.ndarray:
+        c = float(np.cos(phi))
+        s = float(np.sin(phi))
+        return np.array([[c, 1j * s], [1j * s, c]], dtype=np.complex128)
+
+    def wz(theta: float) -> np.ndarray:
+        return np.array(
+            [[np.exp(-1j * float(theta)), 0.0], [0.0, np.exp(+1j * float(theta))]],
+            dtype=np.complex128,
+        )
+
+    SDG = np.array([[1.0, 0.0], [0.0, -1j]], dtype=np.complex128)
+    X = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+
+    re_u00_raw = np.empty_like(x_grid, dtype=np.float64)
+    im_u10_raw = np.empty_like(x_grid, dtype=np.float64)
+    abs_u00_raw = np.empty_like(x_grid, dtype=np.float64)
+    leak_raw = np.empty_like(x_grid, dtype=np.float64)
+
+    re_u00_sdgx = np.empty_like(x_grid, dtype=np.float64)
+
+    for i, th in enumerate(theta_grid):
+        U = np.eye(2, dtype=np.complex128)
+
+        # QSP sequence
+        # 入力ベクトルに左から作用する規約で組む
+        U = rx_minus2phi(float(angles[0])) @ U
+        W = wz(float(th))
+        for k in range(1, angles.size):
+            U = W @ U
+            U = rx_minus2phi(float(angles[k])) @ U
+
+        u00 = U[0, 0]
+        u10 = U[1, 0]
+
+        re_u00_raw[i] = float(np.real(u00))
+        im_u10_raw[i] = float(np.imag(u10))
+        abs_u00_raw[i] = float(np.abs(u00))
+        leak_raw[i] = float(np.abs(u10) ** 2)
+
+        if apply_post_sdgx:
+            U2 = X @ (SDG @ U)
+            re_u00_sdgx[i] = float(np.real(U2[0, 0]))
+
+    # 目標曲線
+    sign_x = np.sign(x_grid)
+    sign_x[np.abs(sign_x) < 1e-15] = 0.0
+
+    plt.figure()
+    plt.plot(x_grid, sign_x, label="sign(x)")
+    plt.plot(x_grid, re_u00_raw, label="Re(U00) raw")
+    plt.plot(x_grid, im_u10_raw, label="Im(U10) raw")
+    if apply_post_sdgx:
+        plt.plot(x_grid, re_u00_sdgx, label="Re(U00) with Sdg+X")
+    plt.xlabel("x")
+    plt.ylabel("response")
+    plt.title(f"QSP response scan, degree={d}, delta={float(delta)}, theta_map={theta_map}")
+    plt.legend()
+    plt.tight_layout()
+    if savepath is not None:
+        plt.savefig(str(savepath), dpi=200)
+    if show:
+        plt.show()
+
+    # 追加の健全性表示
+    # 位相オラクルに近いなら abs(U00)≈1 かつ leak≈0 が望ましい
+    print(f"max |U00| raw = {float(abs_u00_raw.max())}")
+    print(f"min |U00| raw = {float(abs_u00_raw.min())}")
+    print(f"max leak raw = {float(leak_raw.max())}")
+    print(f"min leak raw = {float(leak_raw.min())}")
+    if apply_post_sdgx:
+        # 遷移幅の粗い指標として，|x|>=0.2 の領域での最大誤差を出す
+        mask = np.abs(x_grid) >= 0.2
+        err = np.max(np.abs(re_u00_sdgx[mask] - sign_x[mask]))
+        print(f"max error (|x|>=0.2) for Re(U00) with Sdg+X = {float(err)}")
