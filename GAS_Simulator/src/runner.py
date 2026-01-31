@@ -58,9 +58,17 @@ class GASRunner:
             save_circuit_diagrams(self.model, self.result_dir)
             save_circuit_metrics(self.model, self.result_dir)
 
-        # 真の最小値計算（全列挙）
-        vals, _, _ = calc_obj_fun_distribution(self.model.n_key, self.model.obj_fun_str, self.model.var_type)
-        global_opt_y = float(vals[0])
+        # convergence_backend 優先で分岐（後方互換も確保）
+        conv_backend = getattr(self.model, "convergence_backend", None)
+        if conv_backend is None:
+            conv_backend = self.config.get("simulation", {}).get("convergence_backend", None)
+
+        # 真の最小値計算
+        # - classical_exhaustive の場合は trial 側で 2^n 全列挙するため、ここでは重複計算を避ける
+        global_opt_y = None
+        if conv_backend != "classical_exhaustive":
+            vals, _, _ = calc_obj_fun_distribution(self.model.n_key, self.model.obj_fun_str, self.model.var_type)
+            global_opt_y = float(vals[0])
 
         num_trials = int(self.config.get("execution", {}).get("num_trials", 1))
         max_iter = int(self.config.get("simulation", {}).get("max_iterations", 30))
@@ -79,6 +87,13 @@ class GASRunner:
             if q_success is not None:
                 queries_to_success.append(q_success)
                 success_count += 1
+
+        # classical_exhaustive の場合、最終bestが真の最小値に一致する
+        if global_opt_y is None:
+            try:
+                global_opt_y = float(min(h[-1] for h in all_histories_best if len(h) > 0))
+            except Exception:
+                global_opt_y = float("nan")
 
         # 統計保存
         self._save_convergence_statistics(all_histories_best, all_histories_sample, max_iter, global_opt_y)
@@ -136,6 +151,17 @@ class GASRunner:
     def _run_single_trial(self, trial_id, max_iter, global_opt_y):
         n_key = self.model.n_key
 
+        # convergence_backend 優先で分岐（後方互換も確保）
+        conv_backend = getattr(self.model, "convergence_backend", None)
+        if conv_backend is None:
+            conv_backend = self.config.get("simulation", {}).get("convergence_backend", None)
+
+        # ---- Classical Exhaustive Search baseline ----
+        # 目的関数を 2^n 全列挙して最小値を求める。
+        # クエリ数は「目的関数評価回数」と定義する。
+        if conv_backend == "classical_exhaustive":
+            return self._run_single_trial_classical_exhaustive(max_iter=max_iter, rng=self.rng)
+
         current_x = "".join([str(self.rng.integers(0, 2)) for _ in range(n_key)])
         current_y = float(evaluate_obj(self.model.obj_fun_str, current_x, self.model.var_type))
 
@@ -150,11 +176,6 @@ class GASRunner:
         time_to_solution = None
         if isclose(current_y, global_opt_y, abs_tol=1e-9):
             time_to_solution = 0
-
-        # convergence_backend 優先で分岐（後方互換も確保）
-        conv_backend = getattr(self.model, "convergence_backend", None)
-        if conv_backend is None:
-            conv_backend = self.config.get("simulation", {}).get("convergence_backend", None)
 
         for it in range(1, max_iter + 1):
             # print("current_x:", current_x)
@@ -205,6 +226,68 @@ class GASRunner:
             history_sample.extend([final_best] * padding)
 
         return history_best, history_sample, time_to_solution
+
+    def _run_single_trial_classical_exhaustive(self, max_iter: int, rng: np.random.Generator):
+        """古典的全探索（2^nの目的関数評価）を1trialとして実行する。
+
+        列挙順は trial ごとに乱択化する。
+        収束曲線は max_iter+1 点で出力する。
+        iteration=0 は 1回目の評価後の best。
+        iteration=t (t>=1) は追加のブロック評価後の best。
+        """
+        n_key = int(self.model.n_key)
+        total_evals = int(2 ** n_key)
+
+        # trial ごとに列挙順を乱択化する
+        order = rng.permutation(total_evals)
+
+        # 1回目の評価を iteration=0 に割り当てる
+        i0 = int(order[0])
+        bitstring = format(i0, f"0{n_key}b")[::-1]
+        y0 = float(evaluate_obj(self.model.obj_fun_str, bitstring, self.model.var_type))
+
+        best_y = y0
+        last_best_update_eval = 1  # 1-indexed
+
+        history_best = [best_y]
+        history_sample = [y0]
+
+        if max_iter <= 0 or total_evals == 1:
+            return history_best, history_sample, 1
+
+        remaining = total_evals - 1
+        block = int(ceil(remaining / max_iter))
+
+        eval_done = 1
+        pos = 1
+
+        for _ in range(1, max_iter + 1):
+            if eval_done >= total_evals:
+                history_best.append(best_y)
+                history_sample.append(best_y)
+                continue
+
+            n_this = min(block, total_evals - eval_done)
+            last_y = None
+
+            for _j in range(n_this):
+                i = int(order[pos])
+                pos += 1
+
+                bitstring = format(i, f"0{n_key}b")[::-1]
+                y = float(evaluate_obj(self.model.obj_fun_str, bitstring, self.model.var_type))
+                last_y = y
+
+                eval_done += 1
+
+                if y < best_y:
+                    best_y = y
+                    last_best_update_eval = eval_done
+
+            history_best.append(best_y)
+            history_sample.append(float(last_y) if last_y is not None else best_y)
+
+        return history_best, history_sample, int(last_best_update_eval)
 
     def _save_convergence_statistics(self, all_histories_best, all_histories_sample, max_iter, global_opt_y):
         data_best = np.array(all_histories_best, dtype=float)
