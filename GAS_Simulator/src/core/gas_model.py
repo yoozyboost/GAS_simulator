@@ -167,12 +167,15 @@ class GASModel:
 
         # qsp
         qsp_degree = int(self.qsp_params.get("qsp_degree", 9))
+        blockencoding_method = str(self.qsp_params.get("blockencoding_method", "legacy"))
         return self.oracle_builder.build_oracle(
             n_key=int(self.n_key),
             obj_fun_str=self.obj_fun_str,
             threshold=float(threshold),
             qsp_degree=qsp_degree,
+            blockencoding_method=blockencoding_method,
         )
+
 
     @staticmethod
     def _build_diffuser(n_qubits: int) -> QuantumCircuit:

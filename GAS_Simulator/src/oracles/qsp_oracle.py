@@ -1,6 +1,8 @@
 import numpy as np
 from qiskit import QuantumCircuit
+from qiskit.circuit import Gate
 from functools import lru_cache
+from collections import defaultdict
 from .base import OracleBuilder
 from utils.math_tools import str_to_sympy
 import sympy
@@ -122,6 +124,7 @@ class QSPOracleBuilder(OracleBuilder):
         obj_fun_str = kwargs.get('obj_fun_str')
         threshold = kwargs.get('threshold', 0.0)
         degree = kwargs.get('qsp_degree', 21)
+        blockencoding_method = str(kwargs.get('blockencoding_method', 'legacy'))
 
         if degree % 2 == 0:
             degree += 1
@@ -155,7 +158,13 @@ class QSPOracleBuilder(OracleBuilder):
         angles = get_sign_angles_cached(degree)
 
         # 回路構築へ (スケーリング済みの辞書と閾値を渡す)
-        return self._construct_qsp_circuit(n_key, scaled_polydict, scaled_threshold, angles)
+        return self._construct_qsp_circuit(
+            n_key,
+            scaled_polydict,
+            scaled_threshold,
+            angles,
+            blockencoding_method=blockencoding_method,
+        )
 
     def build_state_prep(self, n_key: int, obj_fun_str: str, state_prep_method, **kwargs) -> QuantumCircuit:
         qc = QuantumCircuit(n_key + 1, name="QSP_StatePrep")
@@ -163,15 +172,126 @@ class QSPOracleBuilder(OracleBuilder):
         qc.compose(qc_key, range(n_key), inplace=True)
         return qc
 
-    def _construct_qsp_circuit(self, n_key, polydict, scaled_threshold, angles):
+    @staticmethod
+    def _make_K(z_indices: list[int], n_qubits: int) -> list[int]:
+        """
+        varify_circuit.py の make_K と同一のロジック。
+        Z項のインデックス集合（term_indices）の「相対構造」から、
+        制御付きX（ancilla→data）の適用先インデックス集合 K を生成する。
+        """
+        if not z_indices:
+            return []
+
+        sorted_indices = sorted(z_indices)
+        min_index = sorted_indices[0]
+        normalized_indices = [idx - min_index for idx in sorted_indices]
+        max_normalized = normalized_indices[-1]
+        required_bits = max_normalized.bit_length()
+        bit_space_size = 1 << required_bits
+
+        z_pattern_mask = 0
+        for idx in normalized_indices:
+            z_pattern_mask |= (1 << idx)
+
+        block_size = bit_space_size >> 1
+        a = z_pattern_mask & ((1 << block_size) - 1) if block_size > 0 else 0
+        b = z_pattern_mask >> block_size
+
+        control_bits = [0] * required_bits
+        for i in range(required_bits):
+            if a == b:
+                control_bits[i] = 1
+            else:
+                control_bits[i] = 0
+                a ^= b
+
+            block_size >>= 1
+            if block_size > 0:
+                mask = (1 << block_size) - 1
+                b = a & mask
+                a >>= block_size
+            else:
+                b = 0
+
+        x_pattern_generator = 1
+        for i in range(required_bits):
+            previous_generator = x_pattern_generator
+            shift_amount = 1 << i
+            x_pattern_generator <<= shift_amount
+            if control_bits[required_bits - 1 - i] == 0:
+                x_pattern_generator += previous_generator
+
+        x_pattern_str = bin(x_pattern_generator)[2:].zfill(bit_space_size)
+        if bit_space_size == 0:
+            return []
+
+        x_indices = [
+            i for i in range(n_qubits)
+            if x_pattern_str[i % bit_space_size] == '1'
+        ]
+        return x_indices
+
+    @classmethod
+    def _build_wz_signal_optimized_gate(cls, n_key: int, polydict: dict) -> Gate:
+        """
+        Wz 信号演算子（|0><0|⊗U + |1><1|⊗U†）を、
+        制御付きK（ancilla→data の CX 群）による共役で構成する。
+
+        量子ビットの並びは [ancilla] + [key0..key_{n_key-1}] とする。
+        """
+        grouped_terms: dict[tuple[int, ...], list[tuple[tuple[int, ...], float]]] = defaultdict(list)
+
+        for (ps, k) in polydict.items():
+            k = float(k)
+            if abs(k) < 1e-12:
+                continue
+
+            term_indices = [i for i, power in enumerate(ps) if power > 0]
+            if not term_indices:
+                continue
+
+            k_key = tuple(cls._make_K(term_indices, n_key))
+            grouped_terms[k_key].append((tuple(term_indices), k))
+
+        Wz = QuantumCircuit(n_key + 1, name="Wz_signal_opt")
+        ancilla = 0
+
+        for k_indices, terms in grouped_terms.items():
+            if k_indices:
+                for idx in k_indices:
+                    Wz.cx(ancilla, int(idx) + 1)
+
+            for term_indices, coeff in terms:
+                angle = 2.0 * float(coeff)
+                if len(term_indices) == 1:
+                    Wz.rz(angle, int(term_indices[0]) + 1)
+                else:
+                    for i in range(len(term_indices) - 1):
+                        Wz.cx(int(term_indices[i]) + 1, int(term_indices[i + 1]) + 1)
+                    Wz.rz(angle, int(term_indices[-1]) + 1)
+                    for i in range(len(term_indices) - 2, -1, -1):
+                        Wz.cx(int(term_indices[i]) + 1, int(term_indices[i + 1]) + 1)
+
+            if k_indices:
+                for idx in k_indices:
+                    Wz.cx(ancilla, int(idx) + 1)
+
+        return Wz.to_gate()
+
+    def _construct_qsp_circuit(self, n_key, polydict, scaled_threshold, angles, blockencoding_method: str = "legacy"):
         # polydictは既にスケーリング済み
         
         # 定数項の集約 (閾値分を引く)
         Delta = -np.pi / 2 - float(scaled_threshold) 
         
         O = QuantumCircuit(n_key + 1, name="QSP_Oracle")
-        Wz_plus = QuantumCircuit(n_key)
-        Wz_minus = QuantumCircuit(n_key)
+
+        use_optimized = (blockencoding_method.lower() in {"optimized", "control_k", "controlled_k", "k_grouped"})
+        if use_optimized:
+            Wz_signal_gate = self._build_wz_signal_optimized_gate(int(n_key), polydict)
+        else:
+            Wz_plus = QuantumCircuit(n_key)
+            Wz_minus = QuantumCircuit(n_key)
 
         for (ps, k) in polydict.items():
             k = float(k)
@@ -182,28 +302,34 @@ class QSPOracleBuilder(OracleBuilder):
                 # 目的関数自体の定数項を加算
                 Delta += k
             else:
-                for i in range(n_nonzero - 1):
-                    Wz_plus.cx(i_nonzero[i], i_nonzero[-1])
-                    Wz_minus.cx(i_nonzero[i], i_nonzero[-1])
-                
-                # 回転角: QSP_ilquantumでは 2*k (kは既にpi/2スケール済み)
-                Wz_plus.rz(2 * k, i_nonzero[-1])
-                Wz_minus.rz(-2 * k, i_nonzero[-1])
-                
-                for i in range(n_nonzero - 1):
-                    Wz_plus.cx(i_nonzero[n_nonzero - 2 - i], i_nonzero[-1])
-                    Wz_minus.cx(i_nonzero[n_nonzero - 2 - i], i_nonzero[-1])
+                if not use_optimized:
+                    for i in range(n_nonzero - 1):
+                        Wz_plus.cx(i_nonzero[i], i_nonzero[-1])
+                        Wz_minus.cx(i_nonzero[i], i_nonzero[-1])
 
-        controlled_Wz_plus = Wz_plus.to_gate().control(1)
-        controlled_Wz_minus = Wz_minus.to_gate().control(1)
+                    # 回転角: QSP_ilquantumでは 2*k (kは既にpi/2スケール済み)
+                    Wz_plus.rz(2 * k, i_nonzero[-1])
+                    Wz_minus.rz(-2 * k, i_nonzero[-1])
+
+                    for i in range(n_nonzero - 1):
+                        Wz_plus.cx(i_nonzero[n_nonzero - 2 - i], i_nonzero[-1])
+                        Wz_minus.cx(i_nonzero[n_nonzero - 2 - i], i_nonzero[-1])
+
+        if not use_optimized:
+            controlled_Wz_plus = Wz_plus.to_gate().control(1)
+            controlled_Wz_minus = Wz_minus.to_gate().control(1)
+
         ancilla = n_key
         
         O.rx(-2 * angles[0], ancilla)
         for i in range(1, len(angles)):
-            O.x(ancilla)
-            O.append(controlled_Wz_plus, [ancilla] + list(range(n_key)))
-            O.x(ancilla)
-            O.append(controlled_Wz_minus, [ancilla] + list(range(n_key)))
+            if use_optimized:
+                O.append(Wz_signal_gate, [ancilla] + list(range(n_key)))
+            else:
+                O.x(ancilla)
+                O.append(controlled_Wz_plus, [ancilla] + list(range(n_key)))
+                O.x(ancilla)
+                O.append(controlled_Wz_minus, [ancilla] + list(range(n_key)))
             
             if abs(Delta) > 1e-9:
                 O.rz(float(2 * Delta), ancilla)

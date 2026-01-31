@@ -12,9 +12,10 @@ def main():
     # ==========================================
     config_list = [
         # "config/qd_spin.yaml",   # シナリオ1
-        "config/qsp_spin_circuit_uniform.yaml",  # シナリオ2
+        "config/qsp_spin_circuit_uniform_legacy-blockencoding.yaml",  # シナリオ2
+        "config/qsp_spin_circuit_uniform_optimized-blockencoding.yaml", 
         # "config/qsp_spin_circuit_dicke.yaml",  # シナリオ2
-        "config/qsp_spin_nocircuit.yaml",  # シナリオ3
+        # "config/qsp_spin_nocircuit.yaml",  # シナリオ3
         # "config/exp_another_test.yaml",
         # "config/analytical.yaml"  # Analyticalモードのベンチマーク
         # "config/qd_binary_circuit.yaml",
