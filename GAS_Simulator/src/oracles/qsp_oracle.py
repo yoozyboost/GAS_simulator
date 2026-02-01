@@ -119,7 +119,7 @@ def get_sign_angles_cached(degree: int, delta: float = 20.0) -> list[float]:
 
 
 class QSPOracleBuilder(OracleBuilder):
-    
+
     def build_oracle(self, n_key: int, **kwargs) -> QuantumCircuit:
         obj_fun_str = kwargs.get('obj_fun_str')
         threshold = kwargs.get('threshold', 0.0)
@@ -130,12 +130,12 @@ class QSPOracleBuilder(OracleBuilder):
             degree += 1
 
         # --- 修正箇所: 正規化ロジックを元のQSP_ilquantumに合わせる ---
-        
+
         # 1. 目的関数のみをパースして係数を取得
         expr = str_to_sympy(obj_fun_str)
         gens = [sympy.Symbol(f"x{i}") for i in range(int(n_key))]
         polydict = sympy.Poly(expr, *gens, domain="RR").as_dict()
-        
+
         # 2. L1ノルム (係数の絶対値和) を計算。閾値は含めない。
         l1_norm = sum(abs(k) for k in polydict.values())
         if l1_norm == 0: l1_norm = 1.0 # ゼロ除算回避
@@ -146,14 +146,14 @@ class QSPOracleBuilder(OracleBuilder):
 
         # 4. 各項の係数をスケーリング
         scaled_polydict = {ps: float(k) * scale_factor for ps, k in polydict.items()}
-        
+
         # 5. 閾値 (Delta) の計算
         # 元コード: Delta = float((-delta / (objfun_max)) * (pi / 2))
         # ここでの threshold は GASの文脈での閾値 y_th。
         # f(x) < y_th  <=>  f(x) - y_th < 0
         # 定数項として -y_th を加えることに相当するため、符号はマイナス
         scaled_threshold = (threshold * scale_factor)
-        
+
         # 6. 角度計算
         angles = get_sign_angles_cached(degree)
 
@@ -280,10 +280,10 @@ class QSPOracleBuilder(OracleBuilder):
 
     def _construct_qsp_circuit(self, n_key, polydict, scaled_threshold, angles, blockencoding_method: str = "legacy"):
         # polydictは既にスケーリング済み
-        
+
         # 定数項の集約 (閾値分を引く)
-        Delta = -np.pi / 2 - float(scaled_threshold) 
-        
+        Delta = -np.pi / 2 - float(scaled_threshold)
+
         O = QuantumCircuit(n_key + 1, name="QSP_Oracle")
 
         use_optimized = (blockencoding_method.lower() in {"optimized", "control_k", "controlled_k", "k_grouped"})
@@ -297,7 +297,7 @@ class QSPOracleBuilder(OracleBuilder):
             k = float(k)
             i_nonzero = np.nonzero(ps)[0]
             n_nonzero = len(i_nonzero)
-            
+
             if n_nonzero == 0:
                 # 目的関数自体の定数項を加算
                 Delta += k
@@ -320,7 +320,7 @@ class QSPOracleBuilder(OracleBuilder):
             controlled_Wz_minus = Wz_minus.to_gate().control(1)
 
         ancilla = n_key
-        
+
         O.rx(-2 * angles[0], ancilla)
         for i in range(1, len(angles)):
             if use_optimized:
@@ -330,11 +330,11 @@ class QSPOracleBuilder(OracleBuilder):
                 O.append(controlled_Wz_plus, [ancilla] + list(range(n_key)))
                 O.x(ancilla)
                 O.append(controlled_Wz_minus, [ancilla] + list(range(n_key)))
-            
+
             if abs(Delta) > 1e-9:
                 O.rz(float(2 * Delta), ancilla)
 
-            
+
             O.rx(-2 * angles[i], ancilla)
         # nocircuit と同じ「S† + X」を末尾に付加する
         O.sdg(ancilla)

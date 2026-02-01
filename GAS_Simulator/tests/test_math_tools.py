@@ -6,8 +6,8 @@ import pytest
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 
 from utils.math_tools import (
-    get_num_vars, 
-    evaluate_obj, 
+    get_num_vars,
+    evaluate_obj,
     convert_binary_to_spin_eq,
     normalize_for_qsp
 )
@@ -36,7 +36,7 @@ def test_conversion():
     # Spin変換: x0 -> (1 - x0)/2  (※変数名はx0のまま)
     # 検算: x0(spin)=+1(bit '0') のとき -> (1 - 1)/2 = 0
     #       x0(spin)=-1(bit '1') のとき -> (1 - (-1))/2 = 1
-    
+
     expr = "x0"
     conv_expr = convert_binary_to_spin_eq(expr)
     # sympyの形式によって "1/2 - x0/2" や "-x0/2 + 1/2" になる
@@ -49,7 +49,7 @@ def test_normalize():
     # 正規化後: (2/5)x0 - (3/5)x1
     expr = "2*x0 - 3*x1"
     norm_expr, scale = normalize_for_qsp(expr)
-    
+
     assert scale == 5.0
     # 簡易チェック
     assert evaluate_obj(norm_expr, "10", "binary") == (2*1 - 3*0)/5

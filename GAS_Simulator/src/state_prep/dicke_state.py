@@ -12,7 +12,7 @@ class DickeStateBuilder(StatePrepBuilder):
         k = kwargs.get('k')
         if k is None:
             raise ValueError("Dicke state requires parameter 'k' (hamming weight).")
-        
+
         qc = self._construct_dicke_state(n_qubits, k)
         qc.name = f"Dicke(n={n_qubits},k={k})"
         return qc
@@ -20,7 +20,7 @@ class DickeStateBuilder(StatePrepBuilder):
     def _construct_dicke_state(self, n: int, k: int) -> QuantumCircuit:
         if not k <= n:
             raise ValueError("k must be <= n")
-        
+
         # 最適化: k > n/2 の場合は反転させる
         if 2 * k > n and k != n:
             qc = self._construct_dicke_state(n, n - k)
@@ -63,7 +63,7 @@ class DickeStateBuilder(StatePrepBuilder):
         qr1 = QuantumRegister(k)
         qr2 = QuantumRegister(min(k, m))
         qc = QuantumCircuit(qr1)
-        
+
         if n - m - k > 0:
             qc.add_register(QuantumRegister(n - m - k))
         qc.add_register(qr2)
@@ -110,7 +110,7 @@ class DickeStateBuilder(StatePrepBuilder):
         qc = QuantumCircuit(n)
         if n == 1 and k == 1:
             return qc
-        
+
         if n == k:
             scs = self._construct_split_cyclic_shift_unitary(n, k - 1)
             dsu = self._construct_dicke_state_unitary(n - 1, k - 1)
@@ -133,7 +133,7 @@ class DickeStateBuilder(StatePrepBuilder):
         for l in range(2, k + 1):
             qc.cx(n - 1 - l, n - 1)
             qc.append(
-                RYGate(self._convert_angle(sqrt(l / n))).control(2), 
+                RYGate(self._convert_angle(sqrt(l / n))).control(2),
                 [n - 1, n - l, n - l - 1]
             )
             qc.cx(n - 1 - l, n - 1)

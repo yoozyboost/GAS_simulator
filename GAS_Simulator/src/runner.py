@@ -178,13 +178,9 @@ class GASRunner:
             time_to_solution = 0
 
         for it in range(1, max_iter + 1):
-            # print("current_x:", current_x)
-            # print("current_y:", current_y)
             rotation_count = int(ceil(self.rng.uniform(0, m)))
-            # print(f"rotation_count: {rotation_count}")
             cumulative_queries += rotation_count
 
-            # print("threshold:", threshold)
             if conv_backend == "nocircuit":
                 new_x = self.model.run_step_nocircuit(threshold, rotation_count, rng=self.rng)
             else:
@@ -192,8 +188,6 @@ class GASRunner:
 
             new_y = float(evaluate_obj(self.model.obj_fun_str, new_x, self.model.var_type))
 
-            # print("new_x:", new_x)
-            # print("new_y:", new_y)
             history_sample.append(new_y)
 
             if time_to_solution is None and isclose(new_y, global_opt_y, abs_tol=1e-9):
@@ -203,9 +197,6 @@ class GASRunner:
                 current_x = new_x
                 current_y = new_y
                 threshold = new_y
-                # print("current_x:", current_x)
-                # print("current_y:", current_y)
-                # print("threshold:", threshold)
                 m = 1.0
                 # no_improvement_count = 0
             else:

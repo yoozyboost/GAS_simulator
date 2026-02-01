@@ -8,11 +8,9 @@ problem:
 algorithm:
   method: qsp
   initial_state: uniform
-  # dicke_state等を使うなら state_prep_params を追加する
-  state_prep_params: {}
-    # k: 3
   qsp_params:
     qsp_degree: 9
+    #効率的なQSPのブロック埋め込み手法を使用
     blockencoding_method: optimized
 
 simulation:

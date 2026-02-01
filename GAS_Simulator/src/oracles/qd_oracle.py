@@ -3,16 +3,16 @@ from qiskit import QuantumCircuit
 from qiskit.circuit.library import QFT
 from .base import OracleBuilder
 from utils.math_tools import str_to_sympy
-import sympy    
+import sympy
 
 class QDOracleBuilder(OracleBuilder):
-    
+
     def build_oracle(self, n_key: int, **kwargs) -> QuantumCircuit:
         """
         QD-GASのオラクル: 値レジスタの先頭(符号ビット)にZゲートをかけるだけ
         """
         n_val = kwargs.get('n_val', 5)
-        
+
         # 回路サイズは n_key + n_val
         qc = QuantumCircuit(n_key + n_val + 1, name="QD_Oracle")
         qc.z(n_key)
@@ -36,28 +36,27 @@ class QDOracleBuilder(OracleBuilder):
         # 1. 基本的な重ね合わせ状態の作成 (Key + Val)
         # ilquantumでは constructAy の冒頭で `A.h(range(n_key + n_val))` としている
         # Key側は W状態などを許容し、Val側は必ずHとする
-        
+
         qc = QuantumCircuit(n_key + n_val + 1, name="QD_StatePrep")
-        
+
         # Key部分の初期化 (Uniform, W, Dickeなど)
         qc_key_init = state_prep_method.build(n_key, **kwargs)
         qc.compose(qc_key_init, range(n_key), inplace=True)
-        
+
         # Value部分の初期化 (常にHadamard)
         qc.h(range(n_key, n_key + n_val))
-        
+
         qc.barrier()
 
         # 2. 位相回転 (Phase encoding)
         if not is_spin:
             # Binary Variables
-            # print(polydict.items())
             # exit()
             for (ps, k) in polydict.items():
                 k = float(k)
                 i_nonzero = np.nonzero(ps)[0]
                 n_nonzero = len(i_nonzero)
-                
+
                 if n_nonzero == 0: # 定数項
                     for v in range(n_val):
                         qc.p(k * np.pi / 2**(n_val - 1 - v), n_key + v)
@@ -82,7 +81,7 @@ class QDOracleBuilder(OracleBuilder):
                         qc.rz(k * np.pi / 2**(n_val - 1 - v), n_key + v)
                         for i in i_nonzero:
                             qc.cx(i, n_key + v)
-        
+
         qc.barrier()
 
         # 3. Inverse QFT

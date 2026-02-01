@@ -221,7 +221,7 @@ class QSPNoCircuitEngine:
 
         # 回路側と同じ正規化
         scaled_threshold = float(threshold) * self._poly.scale_factor
-        Delta = -np.pi / 2 - scaled_threshold + float(self._poly.const_scaled) 
+        Delta = -np.pi / 2 - scaled_threshold + float(self._poly.const_scaled)
 
 
         # θ(z)+Δ を前計算
@@ -237,7 +237,7 @@ class QSPNoCircuitEngine:
             a0, a1 = self._apply_rx_minus2phi(a0, a1, float(self.angles[i]))
 
         a0, a1 = (-1j) * a1, a0
-        
+
         #S_daggerを適用　anc=1に-iを掛ける
         # a1 = 1j * a1
         #Xを適用　anc=0,1を入れ替え

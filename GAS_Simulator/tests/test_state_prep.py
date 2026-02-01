@@ -35,7 +35,7 @@ def test_dicke_state():
     sv = Statevector(qc).data
     # nCk = 4C2 = 6通りの状態が等確率
     expected_amp = sqrt(1/6)
-    
+
     # ハミング重みが2のインデックスを探してチェック
     count = 0
     for i, amp in enumerate(sv):

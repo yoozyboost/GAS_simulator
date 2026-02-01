@@ -13,7 +13,7 @@ class WStateBuilder(StatePrepBuilder):
         qc = QuantumCircuit(n, name="WState")
         if n == 0:
             return qc
-        
+
         qc.x(0)
         count = 1
         queue = [(n // 2, n, 0)]

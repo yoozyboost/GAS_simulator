@@ -1,4 +1,4 @@
-experiment_name: qsp_nocircuit_spin_example
+experiment_name: qsp_nocircuit_spin
 
 problem:
   n_key: 4
@@ -8,8 +8,6 @@ problem:
 algorithm:
   method: qsp
   initial_state: uniform
-  # state_prep_params: 
-    # k : 
   qsp_params:
     qsp_degree: 9
 
@@ -25,6 +23,6 @@ execution:
 circuit_assets:
   build: false
 
-# circuit_evaluation:
-#   optimization_level: 1
-#   basis_gates: Default
+circuit_evaluation:
+  optimization_level: 1
+  basis_gates: Default

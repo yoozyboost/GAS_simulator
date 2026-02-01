@@ -1,4 +1,4 @@
-experiment_name: "qd_spin"
+experiment_name: "qd_spin_nocircuit"
 
 problem:
   n_key: 4

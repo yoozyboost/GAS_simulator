@@ -1,4 +1,4 @@
-experiment_name: qsp_circuit_spin_example
+experiment_name: qsp_spin_circuit_dicke
 
 problem:
   n_key: 4

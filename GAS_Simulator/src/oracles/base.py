@@ -23,7 +23,7 @@ class OracleBuilder(ABC):
         Groverの反復で使用する状態準備回路 (A) を返す。
         QD: 初期化 + 位相エンコード + IQFT (ここに目的関数情報が入る)
         QSP: 単なる初期状態準備 (Hadamardなど)
-        
+
         :param state_prep_method: 初期状態生成クラス (Uniform, W, Dickeなど) のインスタンス
         """
         pass
