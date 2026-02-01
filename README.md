@@ -235,3 +235,10 @@ Console output typically includes, per experiment:
   - `state_prep/`: initial state preparation
   - `oracles/`: oracle builders (QD and QSP)
 - `results/`: outputs and plots
+
+## License
+
+This project is released under the MIT License. See `LICENSE`.
+
+It includes modified portions of software originally developed by Ishikawa Laboratory (MIT License).
+See `THIRD_PARTY_NOTICES.md` for details.
