@@ -1,0 +1,10 @@
+qiskit
+qiskit-aer
+numpy
+scipy
+sympy
+matplotlib
+pyyaml
+tqdm
+pytest
+pyqsp==0.2.0

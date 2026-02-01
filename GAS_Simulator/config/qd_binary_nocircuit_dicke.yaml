@@ -1,0 +1,32 @@
+experiment_name: qd_binary_nocircuit_dicke
+
+problem:
+  n_key: 4
+  n_val: 5
+  objective_function: -x0 + x1 + x2 + x3
+  variable_type: binary
+
+algorithm:
+  method: qd
+  initial_state: dicke
+  # dicke_state等を使うなら state_prep_params を追加する
+  state_prep_params:
+    k: 1 #この目的関数だとかならず最適解のハミング重みは1になる
+
+simulation:
+  backend: statevector
+  # nocircuitを指定することで量子回路を組まずに高速に収束性能をシミュレーション可能
+  convergence_backend: nocircuit
+  qd_nocircuit_mode: fejer
+  max_iterations: 20
+  seed: 0
+
+execution:
+  num_trials: 10
+
+circuit_assets:
+  build: true
+
+circuit_evaluation:
+  optimization_level: 3 
+  basis_gates: Default
