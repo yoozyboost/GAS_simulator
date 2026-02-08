@@ -112,7 +112,7 @@ class BatchGASRunner:
             color = colors[i % len(colors)]
 
             plt.plot(x, y, label=label, color=color, linewidth=2)
-            plt.fill_between(x, y - std, y + std, color=color, alpha=0.1)
+            # plt.fill_between(x, y - std, y + std, color=color, alpha=0.1)
 
             # global_opt は1本だけ描く
             if not global_opt_drawn:

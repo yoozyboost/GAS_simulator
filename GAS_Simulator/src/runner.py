@@ -300,7 +300,7 @@ class GASRunner:
 
         plt.figure(figsize=(10, 6))
         plt.plot(iterations, mean_best, label="Avg Best Value")
-        plt.fill_between(iterations, mean_best - std_best, mean_best + std_best, alpha=0.2)
+        # plt.fill_between(iterations, mean_best - std_best, mean_best + std_best, alpha=0.2)
         plt.plot(iterations, mean_sample, label="Avg Sampled Value", linestyle="--", alpha=0.5)
         plt.axhline(y=global_opt_y, linestyle="--", label="True Minimum")
         plt.xlabel("Iteration")
